@@ -9,10 +9,11 @@ import CopyLinkButton from "@/components/CopyLinkButton";
 
 const BODY = "var(--font-body), system-ui, sans-serif";
 
-function pdfFilename(data: DealData): string {
+function pdfFilename(data: DealData, mode: "minimal" | "wrapped"): string {
   const parts = (data.deal_title ?? "deal").split(" — ");
   const artist = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-  return artist.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-deal-summary.pdf";
+  const slug = artist.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  return mode === "wrapped" ? `${slug}-deal-summary-wrapped.pdf` : `${slug}-deal-summary.pdf`;
 }
 
 const downloadBtnStyle: React.CSSProperties = {
@@ -37,7 +38,6 @@ interface Props {
 
 export default function DealPageClient({ id, data }: Props) {
   const [mode, setMode] = useState<"minimal" | "wrapped">("minimal");
-  const filename = pdfFilename(data);
 
   return (
     <>
@@ -117,8 +117,8 @@ export default function DealPageClient({ id, data }: Props) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <CopyLinkButton dark={mode === "wrapped"} />
             <PDFDownloadLink
-              document={<DealSummaryPDF data={data} />}
-              fileName={filename}
+              document={<DealSummaryPDF data={data} mode={mode} />}
+              fileName={pdfFilename(data, mode)}
               style={downloadBtnStyle}
             >
               {({ loading }) => loading ? "Preparing…" : "Download PDF"}
