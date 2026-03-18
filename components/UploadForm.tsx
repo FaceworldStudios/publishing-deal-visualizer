@@ -37,7 +37,8 @@ export default function UploadForm() {
         return;
       }
 
-      router.push(`/deal/${json.id}`);
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(json.data))));
+      router.push(`/deal/${json.id}?d=${encoded}`);
     } catch {
       setError("Network error. Please try again.");
     } finally {
