@@ -1,11 +1,34 @@
 "use client";
 
 import { useState } from "react";
+import { PDFDownloadLink } from "@react-pdf/renderer";
 import { DealData } from "@/lib/types";
 import DealSummary from "@/components/DealSummary";
+import DealSummaryPDF from "@/components/DealSummaryPDF";
 import CopyLinkButton from "@/components/CopyLinkButton";
 
 const BODY = "var(--font-body), system-ui, sans-serif";
+
+function pdfFilename(data: DealData): string {
+  const parts = (data.deal_title ?? "deal").split(" — ");
+  const artist = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  return artist.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-deal-summary.pdf";
+}
+
+const downloadBtnStyle: React.CSSProperties = {
+  fontFamily: BODY,
+  fontSize: 12,
+  fontWeight: 600,
+  letterSpacing: "0.03em",
+  padding: "7px 16px",
+  borderRadius: 8,
+  background: "#1B4F6B",
+  color: "#EEF4F8",
+  textDecoration: "none",
+  display: "inline-block",
+  border: "none",
+  cursor: "pointer",
+};
 
 interface Props {
   id: string;
@@ -14,6 +37,7 @@ interface Props {
 
 export default function DealPageClient({ id, data }: Props) {
   const [mode, setMode] = useState<"minimal" | "wrapped">("minimal");
+  const filename = pdfFilename(data);
 
   return (
     <>
@@ -92,23 +116,13 @@ export default function DealPageClient({ id, data }: Props) {
           </span>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <CopyLinkButton dark={mode === "wrapped"} />
-            <a
-              href={`/api/export-pdf/${id}`}
-              style={{
-                fontFamily: BODY,
-                fontSize: 12,
-                fontWeight: 600,
-                letterSpacing: "0.03em",
-                padding: "7px 16px",
-                borderRadius: 8,
-                background: "#1B4F6B",
-                color: "#EEF4F8",
-                textDecoration: "none",
-                display: "inline-block",
-              }}
+            <PDFDownloadLink
+              document={<DealSummaryPDF data={data} />}
+              fileName={filename}
+              style={downloadBtnStyle}
             >
-              Download PDF
-            </a>
+              {({ loading }) => loading ? "Preparing…" : "Download PDF"}
+            </PDFDownloadLink>
           </div>
         </div>
 
