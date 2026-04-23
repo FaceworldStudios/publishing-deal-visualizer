@@ -161,10 +161,12 @@ function RoyaltyBarMinimal({
   label: string; pctVal: number; pctRight: number; gradient: string;
   index: number; view: string; reduced: boolean | null;
 }) {
-  const showOutside = (100 - pctVal) >= 12;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 12 }}>
-      <div style={{ position: "relative", height: 56, borderRadius: 10, background: C.cardBg, overflow: "hidden" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", alignItems: "center", gap: 16 }}>
+      <span style={{ fontFamily: BODY, fontSize: 13, fontWeight: 500, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {label}
+      </span>
+      <div style={{ position: "relative", height: 32, borderRadius: 8, background: C.cardBg, overflow: "hidden" }}>
         <motion.div
           key={`${view}-${index}`}
           initial={{ width: reduced ? `${pctVal}%` : "0%" }}
@@ -172,24 +174,11 @@ function RoyaltyBarMinimal({
           transition={reduced ? { duration: 0 } : { duration: 0.5, ease: "easeOut", delay: index * 0.08 }}
           style={{
             position: "absolute", left: 0, top: 0, bottom: 0,
-            background: gradient, borderRadius: 8, overflow: "hidden",
-            display: "flex", alignItems: "center", justifyContent: "flex-end",
-            paddingRight: 14,
+            background: gradient, borderRadius: 8,
           }}
-        >
-          <span style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>
-            {pctVal}%
-          </span>
-        </motion.div>
-        {showOutside && (
-          <div style={{ position: "absolute", right: 12, top: 0, bottom: 0, display: "flex", alignItems: "center", pointerEvents: "none" }}>
-            <span style={{ fontFamily: BODY, fontSize: 12, fontWeight: 500, color: "#B0ACA8" }}>
-              {label} {pctVal}%
-            </span>
-          </div>
-        )}
+        />
       </div>
-      <span style={{ fontFamily: DISPLAY, fontSize: 17, fontWeight: 700, letterSpacing: "-0.01em", color: C.green, minWidth: 44, textAlign: "right" }}>
+      <span style={{ fontFamily: DISPLAY, fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em", color: C.green, minWidth: 56, textAlign: "right" }}>
         {pctRight}%
       </span>
     </div>

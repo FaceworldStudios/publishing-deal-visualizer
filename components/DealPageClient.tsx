@@ -99,7 +99,7 @@ export default function DealPageClient({ id, data }: Props) {
         {/* Nav */}
         <div style={{
           padding: "0 24px",
-          height: 48,
+          height: 72,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -110,14 +110,12 @@ export default function DealPageClient({ id, data }: Props) {
         }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo.png"
+            src={mode === "minimal" ? "/logo2.jpeg" : "/logo.png"}
             alt="Good Problem Studios"
             style={{
-              height: 28,
+              height: 56,
               width: "auto",
               display: "block",
-              borderRadius: 4,
-              opacity: mode === "minimal" ? 0.9 : 1,
             }}
           />
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
