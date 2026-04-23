@@ -108,16 +108,18 @@ export default function DealPageClient({ id, data }: Props) {
           width: "100%",
           borderBottom: mode === "minimal" ? "1px solid #E0DDD8" : "1px solid rgba(255,255,255,0.06)",
         }}>
-          <span style={{
-            fontFamily: BODY,
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: mode === "minimal" ? "#7A7570" : "rgba(255,255,255,0.4)",
-          }}>
-            GPS
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="Good Problem Studios"
+            style={{
+              height: 28,
+              width: "auto",
+              display: "block",
+              borderRadius: 4,
+              opacity: mode === "minimal" ? 0.9 : 1,
+            }}
+          />
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <CopyLinkButton dark={mode === "wrapped"} />
             <PdfDownloadButton data={data} mode={mode} fileName={pdfFilename(data, mode)} style={downloadBtnStyle} />
