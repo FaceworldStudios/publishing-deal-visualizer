@@ -116,6 +116,7 @@ export default function DealPageClient({ id, data }: Props) {
               height: 56,
               width: "auto",
               display: "block",
+              mixBlendMode: mode === "minimal" ? "multiply" : "screen",
             }}
           />
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
