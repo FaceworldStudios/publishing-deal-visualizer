@@ -22,6 +22,9 @@ export interface DealData {
   advance_rollover_usd: number | null;
   advance_rollover_conditions: string | null;
   recoupment_rate: number | null;
+  recoupment_structure: string | null;
+  renewal_terms: string | null;
+  artist_share_pct: number | null;
   royalties: RoyaltyRow[] | null;
   accounting_frequency: string | null;
   accounting_days: number | null;

@@ -1,11 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { PDFDownloadLink } from "@react-pdf/renderer";
+import dynamic from "next/dynamic";
 import { DealData } from "@/lib/types";
 import DealSummary from "@/components/DealSummary";
-import DealSummaryPDF from "@/components/DealSummaryPDF";
 import CopyLinkButton from "@/components/CopyLinkButton";
+
+const PdfDownloadButton = dynamic(
+  () => import("@/components/PdfDownloadButton"),
+  { ssr: false, loading: () => <span style={{ fontSize: 12, color: "#7A7570" }}>Loading…</span> },
+);
 
 const BODY = "var(--font-body), system-ui, sans-serif";
 
@@ -116,13 +120,7 @@ export default function DealPageClient({ id, data }: Props) {
           </span>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <CopyLinkButton dark={mode === "wrapped"} />
-            <PDFDownloadLink
-              document={<DealSummaryPDF data={data} mode={mode} />}
-              fileName={pdfFilename(data, mode)}
-              style={downloadBtnStyle}
-            >
-              {({ loading }) => loading ? "Preparing…" : "Download PDF"}
-            </PDFDownloadLink>
+            <PdfDownloadButton data={data} mode={mode} fileName={pdfFilename(data, mode)} style={downloadBtnStyle} />
           </div>
         </div>
 

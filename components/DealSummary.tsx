@@ -285,7 +285,6 @@ function SummaryItem({
           <p style={{ fontFamily: BODY, fontSize: 13, fontWeight: 600, color: dark ? "#F7F5F0" : C.text, margin: 0 }}>
             {question}
           </p>
-          <PriorityBadge level={cfg.badge} />
         </div>
         <p style={{
           fontFamily: BODY, fontSize: 12,
@@ -377,52 +376,65 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
     ? royMin === royMax ? `${royMin}%` : `${royMin}–${royMax}%`
     : "—";
 
-  // Timeline nodes
-  const tlNodes: TLNode[] = [
+  // Timeline nodes — only include nodes with real content
+  const rawTlNodes: Array<TLNode | null> = [
     { label: "Signing",           timeframe: data.date ?? "—",                         description: "Deal becomes effective. Rights transfer begins.",           color: TL_CONFIG[0].color, Icon: TL_CONFIG[0].Icon },
-    { label: "Rollover Window",   timeframe: "—",                                      description: wLimit(data.advance_rollover_conditions, 25),                color: TL_CONFIG[1].color, Icon: TL_CONFIG[1].Icon },
-    { label: "Early Exit",        timeframe: "—",                                      description: wLimit(data.early_exit, 25),                                color: TL_CONFIG[2].color, Icon: TL_CONFIG[2].Icon },
-    { label: "Royalties Improve", timeframe: yrs !== null ? `After year ${yrs}` : "—", description: wLimit(data.term_notes, 25),                                color: TL_CONFIG[3].color, Icon: TL_CONFIG[3].Icon },
-    { label: "Catalog Return",    timeframe: "—",                                      description: wLimit(data.catalog_reversion, 25),                         color: TL_CONFIG[4].color, Icon: TL_CONFIG[4].Icon },
+    data.advance_rollover_conditions ? { label: "Rollover Window", timeframe: "—", description: wLimit(data.advance_rollover_conditions, 25), color: TL_CONFIG[1].color, Icon: TL_CONFIG[1].Icon } : null,
+    data.early_exit ? { label: "Early Exit", timeframe: "—", description: wLimit(data.early_exit, 25), color: TL_CONFIG[2].color, Icon: TL_CONFIG[2].Icon } : null,
+    (data.renewal_terms || data.term_notes) ? { label: data.renewal_terms ? "Renewal Window" : "Royalties Improve", timeframe: yrs !== null ? `After year ${yrs}` : "—", description: wLimit(data.renewal_terms ?? data.term_notes, 25), color: TL_CONFIG[3].color, Icon: TL_CONFIG[3].Icon } : null,
+    data.catalog_reversion ? { label: "Catalog Return", timeframe: "—", description: wLimit(data.catalog_reversion, 25), color: TL_CONFIG[4].color, Icon: TL_CONFIG[4].Icon } : null,
   ];
+  const tlNodes: TLNode[] = rawTlNodes.filter((n): n is TLNode => n !== null);
 
-  // KV rows
+  // KV rows — drop empties so cards don't show blank lines
   const scopeRows = [
     { label: "Existing catalog",      value: data.scope_existing        ? wLimit("All songs written before signing", 6)  : null },
     { label: "New compositions",      value: data.scope_new             ? wLimit("All songs written during the deal", 6) : null },
     { label: "Territory",             value: data.territory             ? (data.territory.toLowerCase().includes("world") ? "Worldwide" : wLimit(data.territory, 6)) : null },
     { label: "Unexploited reversion", value: data.unexploited_reversion ? wLimit("Returns one year after term ends", 6)  : null },
-  ];
+  ].filter(r => r.value && r.value !== "—");
   const accountingRows = [
     { label: "Statements",        value: data.accounting_frequency },
     { label: "Days after period", value: data.accounting_days !== null ? `${data.accounting_days} days` : null },
     { label: "Pipeline calc",     value: data.pipeline_calc_available === null ? null : data.pipeline_calc_available ? "Available" : "Not available" },
-    { label: "Audit rights",      value: wLimit(data.audit_rights, 6) },
-  ];
+    { label: "Audit rights",      value: data.audit_rights ? wLimit(data.audit_rights, 6) : null },
+  ].filter(r => r.value && r.value !== "—");
 
   // Section 05 answers
-  const royaltyList = royalties.length
-    ? royalties.map(r => `${cleanType(r.income_type)}: ${r.during_term_pct}%`).join(" · ")
-    : "No royalty data parsed.";
+  const royaltyList = data.artist_share_pct !== null && data.artist_share_pct !== undefined
+    ? `${data.artist_share_pct}% of net receipts.`
+    : royalties.length
+      ? royalties.map(r => `${cleanType(r.income_type)}: ${r.during_term_pct}%`).join(" · ")
+      : "No royalty data parsed.";
 
   const advanceAnswer = wLimit([
-    `${usd(data.advance_initial_usd)} upfront at signing.`,
+    data.recoupment_structure
+      ? `${usd(data.advance_initial_usd)} ${data.advance_initial_notes ? "— " + data.advance_initial_notes : "guaranteed spend on this deal."}`
+      : `${usd(data.advance_initial_usd)} upfront at signing.`,
     data.advance_rollover_usd ? `Additional ${usd(data.advance_rollover_usd)} available if advances are recouped within the term.` : null,
   ].filter(Boolean).join(" "), 30);
 
-  const returnAnswer = wLimit(`No earlier than ${yrs ?? "?"} years from signing, once all advances are fully recouped.`, 30);
-  const exitAnswer   = wLimit(data.early_exit ?? "No early exit terms specified in this deal.", 30);
+  const returnAnswer = yrs !== null
+    ? wLimit(
+        data.renewal_terms
+          ? `At the end of the ${yrs}-year license period, unless renewed.`
+          : `No earlier than ${yrs} years from signing, once all advances are fully recouped.`,
+        30,
+      )
+    : null;
+  const exitAnswer   = data.early_exit ? wLimit(data.early_exit, 30) : null;
 
   const royaltyTrendAnswer = afterAvg > duringAvg
     ? `Yes — rises from ${duringAvg}% to ${afterAvg}% on average once the term ends.`
-    : afterAvg === duringAvg
-      ? "Royalty rate stays the same before and after the term."
-      : "Rates vary by income type. See the royalty breakdown above.";
+    : afterAvg < duringAvg
+      ? "Rates vary by income type. See the royalty breakdown above."
+      : null;
 
-  const scopeAnswer = wLimit([
+  const scopeParts = [
     data.scope_existing ? "Existing catalog: all songs written before signing." : null,
     data.scope_new      ? "New songs: everything written during the deal." : null,
-  ].filter(Boolean).join(" ") || "Scope not specified.", 30);
+  ].filter(Boolean);
+  const scopeAnswer = scopeParts.length ? wLimit(scopeParts.join(" "), 30) : null;
 
   const paymentParts = [
     data.accounting_frequency ? `${data.accounting_frequency} statements` : null,
@@ -430,17 +442,17 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
     data.pipeline_calc_available ? "Pipeline calculation available on request" : null,
     data.audit_rights ? wLimit(data.audit_rights, 8) : null,
   ].filter(Boolean);
-  const paymentAnswer = wLimit(paymentParts.length ? paymentParts.join(". ") + "." : "Accounting terms not specified.", 30);
+  const paymentAnswer = paymentParts.length ? wLimit(paymentParts.join(". ") + ".", 30) : null;
 
   const summaryItems = [
-    { cfgIndex: 0, question: "What % do I earn right now?",     answer: royaltyList        },
-    { cfgIndex: 1, question: "How much money upfront?",         answer: advanceAnswer      },
+    { cfgIndex: 0, question: "What % do I earn right now?",     answer: royalties.length ? royaltyList : null },
+    { cfgIndex: 1, question: "How much money upfront?",         answer: data.advance_initial_usd ? advanceAnswer : null },
     { cfgIndex: 2, question: "When do I get my music back?",    answer: returnAnswer       },
     { cfgIndex: 3, question: "What does early exit cost?",      answer: exitAnswer         },
     { cfgIndex: 4, question: "Does my rate improve over time?", answer: royaltyTrendAnswer },
     { cfgIndex: 5, question: "Which songs are covered?",        answer: scopeAnswer        },
     { cfgIndex: 6, question: "How often do I get paid?",        answer: paymentAnswer      },
-  ];
+  ].filter((item): item is { cfgIndex: number; question: string; answer: string } => !!item.answer);
 
   // ── PRINT MODE ─────────────────────────────────────────────────────────────
   if (printMode) {
@@ -500,9 +512,11 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
         {/* QUICKSTATS */}
         <motion.div {...fadeUp(0.05)} style={{ background: C.text, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginBottom: 48 }}>
           {[
-            { label: "Minimum term",  value: yrs !== null ? `${yrs} yrs` : "—",         sub: wLimit("Full reversion takes longer — see timeline", 8) },
-            { label: "Total advance", value: usdK(totalAdv || null),                    sub: wLimit([usd(data.advance_initial_usd), data.advance_rollover_usd ? `+${usdK(data.advance_rollover_usd)} if recouped` : null].filter(Boolean).join(" · "), 8) },
-            { label: "Royalty range", value: royRange,                                  sub: "During term" },
+            { label: yrs !== null && data.renewal_terms ? "License period" : "Minimum term", value: yrs !== null ? `${yrs} yrs` : "—",         sub: data.renewal_terms ? wLimit("Rolling renewal after term", 8) : wLimit("Full reversion takes longer — see timeline", 8) },
+            { label: data.recoupment_structure ? "Funding" : "Total advance", value: usdK(totalAdv || null),                    sub: wLimit([usd(data.advance_initial_usd), data.advance_rollover_usd ? `+${usdK(data.advance_rollover_usd)} if recouped` : null].filter(Boolean).join(" · "), 8) },
+            data.artist_share_pct !== null && data.artist_share_pct !== undefined
+              ? { label: "Your share", value: `${data.artist_share_pct}%`, sub: "Of net receipts" }
+              : { label: "Royalty range", value: royRange, sub: "During term" },
           ].map(({ label, value, sub }, i) => (
             <div key={i} style={{
               padding: "20px 20px",
@@ -514,9 +528,11 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
               <p style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 700, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 4px" }}>
                 {value}
               </p>
-              <p style={{ fontFamily: BODY, fontSize: 10, color: "rgba(255,255,255,0.25)", margin: 0 }}>
-                {sub}
-              </p>
+              {sub && sub !== "—" && (
+                <p style={{ fontFamily: BODY, fontSize: 10, color: "rgba(255,255,255,0.25)", margin: 0 }}>
+                  {sub}
+                </p>
+              )}
             </div>
           ))}
         </motion.div>
@@ -526,7 +542,9 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
           <SectionHeader num="01" title="Royalty Split" />
           {royalties.length > 0 ? (
             <>
-              <RoyaltyToggle activeView={activeView} setActiveView={setActiveView} />
+              {afterAvg !== duringAvg && (
+                <RoyaltyToggle activeView={activeView} setActiveView={setActiveView} />
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
                 {royalties.map((row, i) => (
                   <RoyaltyBarMinimal
@@ -541,20 +559,22 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
                   />
                 ))}
               </div>
-              {/* Legend */}
-              <div style={{ display: "flex", gap: 20, marginBottom: 28 }}>
-                {[{ label: "Your share", grad: BAR_DURING }, { label: "Label's share", grad: C.cardBg }].map(({ label, grad }) => (
-                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <div style={{ width: 24, height: 10, borderRadius: 4, background: grad, border: grad === C.cardBg ? `1px solid ${C.border}` : "none", flexShrink: 0 }} />
-                    <span style={{ fontFamily: BODY, fontSize: 12, color: C.secondary }}>{label}</span>
-                  </div>
-                ))}
-              </div>
-              {/* Table */}
+              {/* Legend — only when deltas exist (during vs after differ) */}
+              {afterAvg !== duringAvg && (
+                <div style={{ display: "flex", gap: 20, marginBottom: 28 }}>
+                  {[{ label: "During term", grad: BAR_DURING }, { label: "After term", grad: BAR_AFTER }].map(({ label, grad }) => (
+                    <div key={label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <div style={{ width: 24, height: 10, borderRadius: 4, background: grad, flexShrink: 0 }} />
+                      <span style={{ fontFamily: BODY, fontSize: 12, color: C.secondary }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Table — collapse to single share column when during == after */}
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {["Source", "During Term", "After Term", "Change"].map((h, i) => (
+                    {(afterAvg !== duringAvg ? ["Source", "During Term", "After Term", "Change"] : ["Source", "Share"]).map((h, i) => (
                       <th key={h} style={{ fontFamily: BODY, padding: "6px 12px 10px", textAlign: i === 0 ? "left" : "right", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: C.secondary, fontWeight: 600 }}>
                         {h}
                       </th>
@@ -567,15 +587,21 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
                     return (
                       <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : C.cardBg, borderBottom: `1px solid ${C.border}` }}>
                         <td style={{ fontFamily: BODY, padding: "11px 12px", color: C.text, fontWeight: 500, fontSize: 14 }}>{cleanType(row.income_type)}</td>
-                        <td style={{ fontFamily: BODY, padding: "11px 12px", textAlign: "right", color: C.muted, fontSize: 14 }}>{pct(row.during_term_pct)}</td>
-                        <td style={{ fontFamily: DISPLAY, padding: "11px 12px", textAlign: "right", color: C.green, fontWeight: 700, fontSize: 16 }}>{pct(row.post_term_pct)}</td>
-                        <td style={{ padding: "11px 12px", textAlign: "right" }}>
-                          {delta > 0
-                            ? <span style={{ fontFamily: BODY, display: "inline-block", background: "#D4EBE0", color: C.green, fontSize: 11, fontWeight: 600, borderRadius: 100, padding: "2px 9px" }}>▲ +{delta}%</span>
-                            : delta < 0
-                            ? <span style={{ fontFamily: BODY, display: "inline-block", background: C.cardBg, color: C.secondary, fontSize: 11, fontWeight: 600, borderRadius: 100, padding: "2px 9px" }}>▼ {delta}%</span>
-                            : <span style={{ color: C.secondary, fontFamily: BODY }}>—</span>}
-                        </td>
+                        {afterAvg !== duringAvg ? (
+                          <>
+                            <td style={{ fontFamily: BODY, padding: "11px 12px", textAlign: "right", color: C.muted, fontSize: 14 }}>{pct(row.during_term_pct)}</td>
+                            <td style={{ fontFamily: DISPLAY, padding: "11px 12px", textAlign: "right", color: C.green, fontWeight: 700, fontSize: 16 }}>{pct(row.post_term_pct)}</td>
+                            <td style={{ padding: "11px 12px", textAlign: "right" }}>
+                              {delta > 0
+                                ? <span style={{ fontFamily: BODY, display: "inline-block", background: "#D4EBE0", color: C.green, fontSize: 11, fontWeight: 600, borderRadius: 100, padding: "2px 9px" }}>▲ +{delta}%</span>
+                                : delta < 0
+                                ? <span style={{ fontFamily: BODY, display: "inline-block", background: C.cardBg, color: C.secondary, fontSize: 11, fontWeight: 600, borderRadius: 100, padding: "2px 9px" }}>▼ {delta}%</span>
+                                : <span style={{ color: C.secondary, fontFamily: BODY }}>—</span>}
+                            </td>
+                          </>
+                        ) : (
+                          <td style={{ fontFamily: DISPLAY, padding: "11px 12px", textAlign: "right", color: C.green, fontWeight: 700, fontSize: 16 }}>{pct(row.during_term_pct)}</td>
+                        )}
                       </tr>
                     );
                   })}
@@ -602,7 +628,7 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
         {/* 03 — ADVANCES & RECOUPMENT */}
         <motion.div {...inView}>
           <SectionHeader num="03" title="Advances & Recoupment" />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: data.advance_rollover_usd ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 12 }}>
             <div style={{ background: C.cardBg, borderRadius: 12, padding: "20px 24px" }}>
               <HandCoins size={24} weight="duotone" color={C.secondary} />
               <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.secondary, margin: "10px 0 6px" }}>Initial Advance</p>
@@ -613,21 +639,23 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
                 </p>
               )}
             </div>
-            <div style={{ background: "linear-gradient(135deg,#D4EBE0,#E8F5EE)", borderRadius: 12, padding: "20px 24px" }}>
-              <ArrowFatLinesUp size={24} weight="duotone" color={C.green} />
-              <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.green, margin: "10px 0 6px" }}>Rollover Advance</p>
-              <p style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, letterSpacing: "-0.01em", color: C.green, margin: 0 }}>{usd(data.advance_rollover_usd ?? null)}</p>
-              {data.advance_rollover_conditions && (
-                <p style={{ fontFamily: BODY, fontSize: 11, color: C.secondary, margin: "6px 0 0", lineHeight: 1.5 }}>
-                  {wLimit(data.advance_rollover_conditions, 15)}
-                </p>
-              )}
-            </div>
+            {data.advance_rollover_usd ? (
+              <div style={{ background: "linear-gradient(135deg,#D4EBE0,#E8F5EE)", borderRadius: 12, padding: "20px 24px" }}>
+                <ArrowFatLinesUp size={24} weight="duotone" color={C.green} />
+                <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.green, margin: "10px 0 6px" }}>Rollover Advance</p>
+                <p style={{ fontFamily: DISPLAY, fontSize: 30, fontWeight: 700, letterSpacing: "-0.01em", color: C.green, margin: 0 }}>{usd(data.advance_rollover_usd)}</p>
+                {data.advance_rollover_conditions && (
+                  <p style={{ fontFamily: BODY, fontSize: 11, color: C.secondary, margin: "6px 0 0", lineHeight: 1.5 }}>
+                    {wLimit(data.advance_rollover_conditions, 15)}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
           <div style={{ background: C.cardBg, borderRadius: 10, padding: "16px 20px", marginBottom: 12 }}>
             <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.muted, margin: "0 0 8px" }}>How recoupment works</p>
             <p style={{ fontFamily: BODY, fontSize: 12, color: C.secondary, margin: 0, lineHeight: 1.7 }}>
-              {wLimit("Advances are recouped from your earned royalties over time. Once fully recouped, royalties flow to you directly.", 30)}
+              {wLimit(data.recoupment_structure ?? "Advances are recouped from your earned royalties over time. Once fully recouped, royalties flow to you directly.", 30)}
             </p>
           </div>
           {data.recoupment_rate !== null && (
@@ -642,24 +670,32 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
           )}
         </motion.div>
 
-        <Divider />
+        {(scopeRows.length > 0 || accountingRows.length > 0) && (
+          <>
+            <Divider />
 
-        {/* 04 — SCOPE & ACCOUNTING */}
-        <motion.div {...inView}>
-          <SectionHeader num="04" title="Scope & Accounting" />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div style={{ background: C.cardBg, borderRadius: 12, padding: "20px 24px 12px" }}>
-              <MusicNote size={20} weight="duotone" color={C.secondary} />
-              <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.secondary, margin: "10px 0 16px" }}>Scope of Rights</p>
-              {scopeRows.map(({ label, value }) => <KVRow key={label} label={label} value={value} />)}
-            </div>
-            <div style={{ background: C.cardBg, borderRadius: 12, padding: "20px 24px 12px" }}>
-              <Receipt size={20} weight="duotone" color={C.secondary} />
-              <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.secondary, margin: "10px 0 16px" }}>Accounting & Audit</p>
-              {accountingRows.map(({ label, value }) => <KVRow key={label} label={label} value={value} />)}
-            </div>
-          </div>
-        </motion.div>
+            {/* 04 — SCOPE & ACCOUNTING */}
+            <motion.div {...inView}>
+              <SectionHeader num="04" title={scopeRows.length && accountingRows.length ? "Scope & Accounting" : scopeRows.length ? "Scope" : "Accounting"} />
+              <div style={{ display: "grid", gridTemplateColumns: scopeRows.length && accountingRows.length ? "1fr 1fr" : "1fr", gap: 12 }}>
+                {scopeRows.length > 0 && (
+                  <div style={{ background: C.cardBg, borderRadius: 12, padding: "20px 24px 12px" }}>
+                    <MusicNote size={20} weight="duotone" color={C.secondary} />
+                    <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.secondary, margin: "10px 0 16px" }}>Scope of Rights</p>
+                    {scopeRows.map(({ label, value }) => <KVRow key={label} label={label} value={value} />)}
+                  </div>
+                )}
+                {accountingRows.length > 0 && (
+                  <div style={{ background: C.cardBg, borderRadius: 12, padding: "20px 24px 12px" }}>
+                    <Receipt size={20} weight="duotone" color={C.secondary} />
+                    <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase", color: C.secondary, margin: "10px 0 16px" }}>Accounting & Audit</p>
+                    {accountingRows.map(({ label, value }) => <KVRow key={label} label={label} value={value} />)}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
 
         <Divider />
 
@@ -667,7 +703,7 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
         <motion.div {...inView}>
           <SectionHeader num="05" title="Plain English Summary" />
           <p style={{ fontFamily: BODY, fontSize: 12, color: C.muted, margin: "-12px 0 4px", lineHeight: 1.5 }}>
-            The 7 things that matter most, in order of importance
+            The things that matter most, in order of importance
           </p>
           <div>
             {summaryItems.map((item, i) => (
@@ -722,9 +758,11 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
       {/* QUICKSTATS */}
       <div style={{ background: "#111111", display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
         {[
-          { label: "Minimum term",  value: yrs !== null ? `${yrs} yrs` : "—",  sub: wLimit("Full reversion takes longer", 6) },
-          { label: "Total advance", value: usdK(totalAdv || null),             sub: "signing + rollover"                      },
-          { label: "Royalty range", value: royRange,                           sub: "During term"                             },
+          { label: data.renewal_terms ? "License period" : "Minimum term", value: yrs !== null ? `${yrs} yrs` : "—", sub: data.renewal_terms ? "Rolling renewal after" : wLimit("Full reversion takes longer", 6) },
+          { label: data.recoupment_structure ? "Funding" : "Total advance", value: usdK(totalAdv || null), sub: data.advance_rollover_usd ? "signing + rollover" : "on signing" },
+          data.artist_share_pct !== null && data.artist_share_pct !== undefined
+            ? { label: "Your share", value: `${data.artist_share_pct}%`, sub: "Of net receipts" }
+            : { label: "Royalty range", value: royRange, sub: afterAvg !== duringAvg ? "During term" : "Of net receipts" },
         ].map(({ label, value, sub }, i) => (
           <div key={i} style={{ padding: "20px 16px", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
             <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>
@@ -740,13 +778,14 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
         ))}
       </div>
 
-      {/* PANEL 2 — THE ADVANCE */}
+      {/* PANEL 2 — THE ADVANCE / FUNDING */}
+      {data.advance_initial_usd ? (
       <div style={{ background: "#C8F064", padding: "40px 32px" }}>
         <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(0,0,0,0.4)", margin: "0 0 8px" }}>
-          The Advance
+          {data.recoupment_structure ? "Funding" : "The Advance"}
         </p>
         <p style={{ fontFamily: BODY, fontSize: 15, fontWeight: 500, color: "#0A0A0A", margin: "0 0 8px" }}>
-          On signing, this is yours.
+          {data.recoupment_structure ? "Guaranteed spend on this deal." : "On signing, this is yours."}
         </p>
         <p style={{ fontFamily: DISPLAY, fontSize: 80, fontWeight: 700, letterSpacing: "-0.02em", color: "#0A0A0A", margin: "0 0 4px", lineHeight: 1 }}>
           {usdK(data.advance_initial_usd)}
@@ -769,6 +808,7 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
           </div>
         )}
       </div>
+      ) : null}
 
       {/* PANEL 3 — YOUR CUT */}
       <div style={{ background: "#1A1814", padding: "40px 32px" }}>
@@ -778,7 +818,9 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
         <p style={{ fontFamily: BODY, fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.7)", margin: "0 0 24px" }}>
           Every dollar collected. Here's the split.
         </p>
-        <RoyaltyToggle activeView={activeView} setActiveView={setActiveView} dark />
+        {afterAvg !== duringAvg && (
+          <RoyaltyToggle activeView={activeView} setActiveView={setActiveView} dark />
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {royalties.map((row, i) => {
             const pctVal = activeView === "during" ? row.during_term_pct : row.post_term_pct;
@@ -822,27 +864,29 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
       </div>
 
       {/* PANEL 5 — THE TERM */}
-      <div style={{ background: "#1A0F28", padding: "40px 32px" }}>
-        <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>
-          The Term
-        </p>
-        <p style={{ fontFamily: BODY, fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.7)", margin: "0 0 12px" }}>
-          Minimum time your music is administered.
-        </p>
-        <p style={{ fontFamily: DISPLAY, fontSize: 88, fontWeight: 700, letterSpacing: "-0.02em", color: "#fff", margin: 0, lineHeight: 1 }}>
-          {yrs ?? "—"}
-        </p>
-        <p style={{ fontFamily: DISPLAY, fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: "rgba(255,255,255,0.25)", margin: "0 0 28px" }}>
-          years minimum
-        </p>
-        {data.term_notes && (
-          <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "16px 20px" }}>
-            <p style={{ fontFamily: BODY, fontSize: 12, color: "rgba(255,255,255,0.45)", margin: 0, lineHeight: 1.7 }}>
-              {wLimit(data.term_notes, 40)}
-            </p>
-          </div>
-        )}
-      </div>
+      {yrs !== null && (
+        <div style={{ background: "#1A0F28", padding: "40px 32px" }}>
+          <p style={{ fontFamily: BODY, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 8px" }}>
+            {data.renewal_terms ? "License Period" : "The Term"}
+          </p>
+          <p style={{ fontFamily: BODY, fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.7)", margin: "0 0 12px" }}>
+            {data.renewal_terms ? "How long this deal runs." : "Minimum time your music is administered."}
+          </p>
+          <p style={{ fontFamily: DISPLAY, fontSize: 88, fontWeight: 700, letterSpacing: "-0.02em", color: "#fff", margin: 0, lineHeight: 1 }}>
+            {yrs}
+          </p>
+          <p style={{ fontFamily: DISPLAY, fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: "rgba(255,255,255,0.25)", margin: "0 0 28px" }}>
+            {data.renewal_terms ? "year license" : "years minimum"}
+          </p>
+          {(data.renewal_terms || data.term_notes) && (
+            <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "16px 20px" }}>
+              <p style={{ fontFamily: BODY, fontSize: 12, color: "rgba(255,255,255,0.45)", margin: 0, lineHeight: 1.7 }}>
+                {wLimit(data.renewal_terms ?? data.term_notes, 40)}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* PANEL 6 — PLAIN ENGLISH */}
       <div style={{ background: "#F7F5F0", padding: "40px 32px" }}>
@@ -850,7 +894,7 @@ export default function DealSummary({ data, printMode, mode = "minimal" }: Props
           Plain English
         </p>
         <p style={{ fontFamily: BODY, fontSize: 15, fontWeight: 500, color: C.text, margin: "0 0 4px" }}>
-          The 7 things that matter most.
+          The things that matter most.
         </p>
         <div>
           {summaryItems.map((item, i) => (

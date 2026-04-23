@@ -6,8 +6,15 @@ const client = new Anthropic({ timeout: 110_000 }); // 110s — just under route
 const SYSTEM_PROMPT = `You are a music publishing contract analyst. Given raw contract text, extract the following fields and return ONLY valid JSON — no preamble, no markdown fences.
 
 Important rules for text fields:
-- Summarize each timeline milestone (early_exit, catalog_reversion, unexploited_reversion, term_notes, advance_rollover_conditions) in plain English. Maximum 2 sentences, 25 words total. No legal terminology, no clause references, no parentheticals.
+- Summarize each timeline milestone (early_exit, catalog_reversion, unexploited_reversion, term_notes, advance_rollover_conditions, recoupment_structure, renewal_terms) in plain English. Maximum 2 sentences, 25 words total. No legal terminology, no clause references, no parentheticals.
 - Never include raw clause numbers, section references, or verbatim legal language in any string field.
+
+Mapping rules for non-traditional deal formats (distribution, marketing, services deals):
+- If the memo uses "Funding" or "Marketing Spend" instead of "Advance", map the dollar figure to advance_initial_usd and describe it in advance_initial_notes (e.g. "Guaranteed minimum marketing spend after full execution of longform agreement").
+- If a revenue share splits net receipts across multiple parties (e.g. Artist / Label / Distributor), encode each party as a separate row in the royalties array where income_type = the party name and during_term_pct = post_term_pct = that party's share. The artist's own share should appear as one of the rows.
+- Map "License Period" to term_years (use the number of years).
+- Map renewal or option language (e.g. "Rolling annual renewal unless terminated X days prior") to renewal_terms.
+- Map shared or off-the-top recoupment language to recoupment_structure (e.g. "Off the top, shared equally between label and artist"). Leave recoupment_rate null unless a percentage buyout figure is given.
 
 {
   "deal_title": "string — parties involved e.g. Warner Chappell Music Canada — TOBi",
@@ -26,7 +33,10 @@ Important rules for text fields:
   "advance_initial_notes": "string",
   "advance_rollover_usd": "number or null",
   "advance_rollover_conditions": "string or null",
-  "recoupment_rate": "number — e.g. 120 meaning 120%",
+  "recoupment_rate": "number — e.g. 120 meaning 120%, null if not a percentage buyout",
+  "recoupment_structure": "string or null — plain-English description of how recoupment works, especially for shared or off-the-top structures",
+  "renewal_terms": "string or null — plain-English description of option/renewal behavior after the initial term",
+  "artist_share_pct": "number or null — the artist's exact share of net receipts as a percentage (e.g. 46.5). Only set when the memo specifies a single headline number that represents what the artist personally receives. Leave null for traditional publishing royalties that vary by income type.",
   "royalties": [
     {
       "income_type": "string",
