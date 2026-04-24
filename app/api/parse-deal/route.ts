@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { v4 as uuidv4 } from "uuid";
 import { parseDealWithClaude } from "@/lib/claude";
-import { saveDeal } from "@/lib/store";
+import { saveDeal, shortId } from "@/lib/store";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 
 // Allow up to 120s for large PDFs + Claude response
@@ -58,8 +57,8 @@ export async function POST(req: NextRequest) {
     if (!dealData.royalties || dealData.royalties.length === 0)
       missing.push("royalties");
 
-    const id = uuidv4();
-    saveDeal({ id, created_at: new Date().toISOString(), data: dealData });
+    const id = shortId();
+    await saveDeal({ id, created_at: new Date().toISOString(), data: dealData });
 
     return NextResponse.json({ id, data: dealData, missing_fields: missing });
   } catch (err) {

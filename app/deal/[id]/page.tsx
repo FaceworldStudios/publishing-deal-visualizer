@@ -21,7 +21,7 @@ export default async function DealPage({ params, searchParams }: Props) {
       notFound();
     }
   } else {
-    const deal = getDeal(id);
+    const deal = await getDeal(id);
     if (!deal) notFound();
     data = deal.data;
   }

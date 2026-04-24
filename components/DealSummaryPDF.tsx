@@ -19,12 +19,16 @@ function pct(val: number | null | undefined): string {
 function cleanType(s: string): string {
   return s.replace(/\bincome\b/gi, "").replace(/\s{2,}/g, " ").trim();
 }
-function wLimit(s: string | null | undefined, n: number): string {
-  if (!s || s.trim() === "" || s === "—") return "—";
+function wLimit(s: string | null | undefined, n: number): string | null {
+  if (!s || s.trim() === "" || s === "—") return null;
   return s.trim().split(/\s+/).slice(0, n).join(" ");
 }
 
 // ── Derived data builder ──────────────────────────────────────────────────────
+interface TLNode { label: string; timeframe: string; desc: string; color: string }
+interface KV { k: string; v: string }
+interface SumItem { q: string; a: string; color: string }
+
 function buildDerived(data: DealData) {
   const royalties = data.royalties ?? [];
   const yrs = data.term_years;
@@ -40,59 +44,99 @@ function buildDerived(data: DealData) {
   const duringAvg = royalties.length ? Math.round(royalties.reduce((s, r) => s + r.during_term_pct, 0) / royalties.length) : 0;
   const afterAvg  = royalties.length ? Math.round(royalties.reduce((s, r) => s + r.post_term_pct,  0) / royalties.length) : 0;
 
-  const tlNodes = [
-    { label: "Signing",           timeframe: data.date ?? "—",                         desc: "Deal becomes effective. Rights transfer begins.",  color: "#1B4F6B" },
-    { label: "Rollover Window",   timeframe: "—",                                      desc: wLimit(data.advance_rollover_conditions, 25),       color: "#1A6B4A" },
-    { label: "Early Exit",        timeframe: "—",                                      desc: wLimit(data.early_exit, 25),                        color: "#6B6560" },
-    { label: "Royalties Improve", timeframe: yrs != null ? `After year ${yrs}` : "—", desc: wLimit(data.term_notes, 25),                        color: "#B05C1A" },
-    { label: "Catalog Return",    timeframe: "—",                                      desc: wLimit(data.catalog_reversion, 25),                 color: "#A8A4A0" },
+  // Timeline nodes — only include ones with real content
+  const rawNodes: Array<TLNode | null> = [
+    { label: "Signing", timeframe: data.date ?? "—", desc: "Deal becomes effective. Rights transfer begins.", color: "#1B4F6B" },
+    data.advance_rollover_conditions ? { label: "Rollover Window", timeframe: "—", desc: wLimit(data.advance_rollover_conditions, 25) ?? "", color: "#1A6B4A" } : null,
+    data.early_exit ? { label: "Early Exit", timeframe: "—", desc: wLimit(data.early_exit, 25) ?? "", color: "#6B6560" } : null,
+    (data.renewal_terms || data.term_notes)
+      ? { label: data.renewal_terms ? "Renewal Window" : "Royalties Improve", timeframe: yrs != null ? `After year ${yrs}` : "—", desc: wLimit(data.renewal_terms ?? data.term_notes, 25) ?? "", color: "#B05C1A" }
+      : null,
+    data.catalog_reversion ? { label: "Catalog Return", timeframe: "—", desc: wLimit(data.catalog_reversion, 25) ?? "", color: "#A8A4A0" } : null,
   ];
-  const scopeRows = [
-    { k: "Existing catalog",      v: data.scope_existing        ? "All songs before signing"        : "—" },
-    { k: "New compositions",      v: data.scope_new             ? "All songs during deal"           : "—" },
-    { k: "Territory",             v: data.territory             ? (data.territory.toLowerCase().includes("world") ? "Worldwide" : wLimit(data.territory, 4)) : "—" },
-    { k: "Unexploited reversion", v: data.unexploited_reversion ? "Returns one year after term"     : "—" },
-  ];
-  const acctRows = [
-    { k: "Statements",        v: data.accounting_frequency ?? "—" },
-    { k: "Days after period", v: data.accounting_days != null ? `${data.accounting_days} days` : "—" },
-    { k: "Pipeline calc",     v: data.pipeline_calc_available == null ? "—" : data.pipeline_calc_available ? "Available" : "Not available" },
-    { k: "Audit rights",      v: wLimit(data.audit_rights, 5) },
-  ];
+  const tlNodes: TLNode[] = rawNodes.filter((n): n is TLNode => n !== null);
 
-  const royaltyList = royalties.length
-    ? royalties.map(r => `${cleanType(r.income_type)}: ${r.during_term_pct}%`).join("  ·  ")
-    : "No royalty data parsed.";
-  const advanceAnswer = wLimit([
-    `${usd(data.advance_initial_usd)} upfront at signing.`,
-    data.advance_rollover_usd ? `Additional ${usd(data.advance_rollover_usd)} available if advances recouped within term.` : null,
-  ].filter(Boolean).join(" "), 30);
-  const returnAnswer = wLimit(`No earlier than ${yrs ?? "?"} years from signing, once all advances are fully recouped.`, 30);
-  const exitAnswer   = wLimit(data.early_exit ?? "No early exit terms specified in this deal.", 30);
-  const trendAnswer  = afterAvg > duringAvg
+  const scopeRows: KV[] = [
+    data.scope_existing        ? { k: "Existing catalog",      v: "All songs before signing" } : null,
+    data.scope_new             ? { k: "New compositions",      v: "All songs during deal" } : null,
+    data.territory             ? { k: "Territory",             v: data.territory.toLowerCase().includes("world") ? "Worldwide" : (wLimit(data.territory, 4) ?? data.territory) } : null,
+    data.unexploited_reversion ? { k: "Unexploited reversion", v: "Returns one year after term" } : null,
+  ].filter((r): r is KV => r !== null);
+
+  const acctRows: KV[] = [
+    data.accounting_frequency        ? { k: "Statements",        v: data.accounting_frequency } : null,
+    data.accounting_days != null     ? { k: "Days after period", v: `${data.accounting_days} days` } : null,
+    data.pipeline_calc_available != null ? { k: "Pipeline calc", v: data.pipeline_calc_available ? "Available" : "Not available" } : null,
+    data.audit_rights ? { k: "Audit rights", v: wLimit(data.audit_rights, 5) ?? "" } : null,
+  ].filter((r): r is KV => r !== null);
+
+  // Plain English answers — null if no data
+  const royaltyList = data.artist_share_pct != null
+    ? `${data.artist_share_pct}% of net receipts.`
+    : royalties.length
+      ? royalties.map(r => `${cleanType(r.income_type)}: ${r.during_term_pct}%`).join("  ·  ")
+      : null;
+
+  const advanceAnswer = data.advance_initial_usd
+    ? wLimit([
+        data.recoupment_structure
+          ? `${usd(data.advance_initial_usd)}${data.advance_initial_notes ? " — " + data.advance_initial_notes : " guaranteed spend on this deal."}`
+          : `${usd(data.advance_initial_usd)} upfront at signing.`,
+        data.advance_rollover_usd ? `Additional ${usd(data.advance_rollover_usd)} available if advances recouped within term.` : null,
+      ].filter(Boolean).join(" "), 30)
+    : null;
+
+  const returnAnswer = yrs != null
+    ? wLimit(
+        data.renewal_terms
+          ? `At the end of the ${yrs}-year license period, unless renewed.`
+          : `No earlier than ${yrs} years from signing, once all advances are fully recouped.`,
+        30,
+      )
+    : null;
+
+  const exitAnswer = data.early_exit ? wLimit(data.early_exit, 30) : null;
+
+  const trendAnswer = afterAvg > duringAvg
     ? `Yes — rises from ${duringAvg}% to ${afterAvg}% on average once the term ends.`
-    : "Royalty rate stays the same before and after the term.";
-  const scopeAnswer  = wLimit([
+    : afterAvg < duringAvg
+      ? "Rates vary by income type. See the royalty breakdown above."
+      : null;
+
+  const scopeParts = [
     data.scope_existing ? "Existing catalog: all songs written before signing." : null,
     data.scope_new      ? "New songs: everything written during the deal." : null,
-  ].filter(Boolean).join(" ") || "Scope not specified.", 30);
+  ].filter(Boolean);
+  const scopeAnswer = scopeParts.length ? wLimit(scopeParts.join(" "), 30) : null;
+
   const payParts = [
     data.accounting_frequency ? `${data.accounting_frequency} statements` : null,
     data.accounting_days      ? `${data.accounting_days} days after each period` : null,
   ].filter(Boolean);
-  const payAnswer = wLimit(payParts.length ? payParts.join(". ") + "." : "Accounting terms not specified.", 30);
+  const payAnswer = payParts.length ? wLimit(payParts.join(". ") + ".", 30) : null;
 
-  const summaryItems = [
-    { q: "What % do I earn right now?",     a: royaltyList,   badge: "Critical",   color: "#1B4F6B" },
-    { q: "How much money upfront?",         a: advanceAnswer, badge: "Critical",   color: "#1A6B4A" },
-    { q: "When do I get my music back?",    a: returnAnswer,  badge: "Critical",   color: "#1A6B4A" },
-    { q: "What does early exit cost?",      a: exitAnswer,    badge: "High",       color: "#6B6560" },
-    { q: "Does my rate improve over time?", a: trendAnswer,   badge: "High",       color: "#1A6B4A" },
-    { q: "Which songs are covered?",        a: scopeAnswer,   badge: "Supporting", color: "#6B6560" },
-    { q: "How often do I get paid?",        a: payAnswer,     badge: "Context",    color: "#6B6560" },
-  ];
+  const summaryItems: SumItem[] = [
+    { q: "What % do I earn right now?",     a: royaltyList,   color: "#1B4F6B" },
+    { q: "How much money upfront?",         a: advanceAnswer, color: "#1A6B4A" },
+    { q: "When do I get my music back?",    a: returnAnswer,  color: "#1A6B4A" },
+    { q: "What does early exit cost?",      a: exitAnswer,    color: "#6B6560" },
+    { q: "Does my rate improve over time?", a: trendAnswer,   color: "#1A6B4A" },
+    { q: "Which songs are covered?",        a: scopeAnswer,   color: "#6B6560" },
+    { q: "How often do I get paid?",        a: payAnswer,     color: "#6B6560" },
+  ].filter((item): item is SumItem => !!item.a);
 
-  return { royalties, yrs, totalAdv, publisherLine, artistName, royRange, duringAvg, afterAvg, tlNodes, scopeRows, acctRows, summaryItems };
+  // Adaptive quickstats
+  const termLabel = data.renewal_terms ? "License Period" : "Minimum Term";
+  const advanceLabel = data.recoupment_structure ? "Funding" : "Total Advance";
+  const shareQuickstat = data.artist_share_pct != null
+    ? { label: "Your Share", value: `${data.artist_share_pct}%`, sub: "Of net receipts" }
+    : { label: "Royalty Range", value: royRange, sub: afterAvg !== duringAvg ? "During term" : "Of net receipts" };
+
+  return {
+    royalties, yrs, totalAdv, publisherLine, artistName, royRange,
+    duringAvg, afterAvg, tlNodes, scopeRows, acctRows, summaryItems,
+    termLabel, advanceLabel, shareQuickstat,
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -145,18 +189,22 @@ const m = StyleSheet.create({
   sumDot:      { width: 8, height: 8, borderRadius: 4, marginTop: 1 },
   sumQ:        { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#1A1814", marginBottom: 2 },
   sumA:        { fontSize: 8, color: "#7A7570", lineHeight: 1.45 },
-  sumBadge:    { fontSize: 7, color: "#1A6B4A" },
 });
 
 function MinimalPDF({ data }: { data: DealData }) {
   const d = buildDerived(data);
+  const hasScopeOrAcct = d.scopeRows.length > 0 || d.acctRows.length > 0;
+  const showAfterTerm = d.afterAvg !== d.duringAvg;
+
   return (
     <Document>
       <Page size="A4" orientation="landscape" style={m.page}>
         {/* Header */}
         <View style={m.header}>
           <Text style={m.headerTitle}>{d.publisherLine} ×{d.artistName ? ` ${d.artistName}` : ""}</Text>
-          <Text style={m.headerMeta}>{data.date ?? ""}{"  "}{data.status ? `· ${data.status}` : ""}</Text>
+          {(data.date || data.status) && (
+            <Text style={m.headerMeta}>{data.date ?? ""}{data.status ? `  ·  ${data.status}` : ""}</Text>
+          )}
           <Text style={m.headerPrep}>Prepared by Good Problem Studios</Text>
         </View>
         <View style={m.divider} />
@@ -164,11 +212,10 @@ function MinimalPDF({ data }: { data: DealData }) {
         {/* Key numbers */}
         <View style={m.statsRow}>
           {[
-            { label: "Minimum Term",   value: d.yrs != null ? `${d.yrs} yrs` : "—",  sub: "Minimum administration period" },
-            { label: "Total Advance",  value: usdK(d.totalAdv || null),               sub: usd(data.advance_initial_usd) + (data.advance_rollover_usd ? ` + ${usd(data.advance_rollover_usd)}` : "") },
-            { label: "Royalty Range",  value: d.royRange,                             sub: "During term" },
-            { label: "Catalog Return", value: "After term",                           sub: d.yrs != null ? `${d.yrs}+ yrs post-term` : "Post-term" },
-          ].map(({ label, value, sub }) => (
+            d.yrs != null ? { label: d.termLabel, value: `${d.yrs} yrs`, sub: data.renewal_terms ? "Rolling renewal after" : "Minimum administration period" } : null,
+            d.totalAdv > 0 ? { label: d.advanceLabel, value: usdK(d.totalAdv), sub: usd(data.advance_initial_usd) + (data.advance_rollover_usd ? ` + ${usd(data.advance_rollover_usd)}` : "") } : null,
+            { label: d.shareQuickstat.label, value: d.shareQuickstat.value, sub: d.shareQuickstat.sub },
+          ].filter((s): s is { label: string; value: string; sub: string } => s !== null).map(({ label, value, sub }) => (
             <View key={label} style={m.statBox}>
               <Text style={m.statLabel}>{label}</Text>
               <Text style={m.statValue}>{value}</Text>
@@ -185,98 +232,136 @@ function MinimalPDF({ data }: { data: DealData }) {
           <View>
             <View style={m.thRow}>
               <Text style={m.cSrcHd}>Source</Text>
-              <Text style={m.cNumHd}>During Term</Text>
-              <Text style={m.cNumHd}>After Term</Text>
-              <Text style={m.cNumHd}>Change</Text>
+              {showAfterTerm ? (
+                <>
+                  <Text style={m.cNumHd}>During Term</Text>
+                  <Text style={m.cNumHd}>After Term</Text>
+                  <Text style={m.cNumHd}>Change</Text>
+                </>
+              ) : (
+                <Text style={m.cNumHd}>Share</Text>
+              )}
             </View>
             {d.royalties.map((row, i) => {
               const delta = row.post_term_pct - row.during_term_pct;
               return (
                 <View key={i} style={i % 2 === 0 ? m.tRow : m.tRowAlt}>
                   <Text style={m.cSrc}>{cleanType(row.income_type)}</Text>
-                  <Text style={m.cNum}>{pct(row.during_term_pct)}</Text>
-                  <Text style={m.cGreen}>{pct(row.post_term_pct)}</Text>
-                  <Text style={m.cDelta}>{delta > 0 ? `▲ +${delta}%` : delta < 0 ? `▼ ${delta}%` : "—"}</Text>
+                  {showAfterTerm ? (
+                    <>
+                      <Text style={m.cNum}>{pct(row.during_term_pct)}</Text>
+                      <Text style={m.cGreen}>{pct(row.post_term_pct)}</Text>
+                      <Text style={m.cDelta}>{delta > 0 ? `+${delta}%` : delta < 0 ? `${delta}%` : "—"}</Text>
+                    </>
+                  ) : (
+                    <Text style={m.cGreen}>{pct(row.during_term_pct)}</Text>
+                  )}
                 </View>
               );
             })}
           </View>
         ) : <Text style={{ fontSize: 8, color: "#7A7570" }}>Royalties not parsed — review contract</Text>}
-        <View style={m.divider} />
 
         {/* Timeline */}
-        <Text style={m.secNum}>02</Text>
-        <Text style={m.secTitle}>Deal Timeline</Text>
-        {d.tlNodes.map((node, i) => (
-          <View key={i} style={m.tlRow}>
-            <Text style={m.tlTime}>{node.timeframe}</Text>
-            <View style={[m.tlDot, { backgroundColor: node.color }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={m.tlName}>{node.label}</Text>
-              <Text style={m.tlDesc}>{node.desc}</Text>
-            </View>
-          </View>
-        ))}
-        <View style={m.divider} />
+        {d.tlNodes.length > 0 && (
+          <>
+            <View style={m.divider} />
+            <Text style={m.secNum}>02</Text>
+            <Text style={m.secTitle}>Deal Timeline</Text>
+            {d.tlNodes.map((node, i) => (
+              <View key={i} style={m.tlRow}>
+                <Text style={m.tlTime}>{node.timeframe !== "—" ? node.timeframe : ""}</Text>
+                <View style={[m.tlDot, { backgroundColor: node.color }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={m.tlName}>{node.label}</Text>
+                  <Text style={m.tlDesc}>{node.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
 
         {/* Advances */}
-        <Text style={m.secNum}>03</Text>
-        <Text style={m.secTitle}>Advances & Recoupment</Text>
-        <View style={m.advRow}>
-          <View style={m.advCard}>
-            <Text style={m.advLabel}>Initial Advance</Text>
-            <Text style={m.advAmt}>{usd(data.advance_initial_usd)}</Text>
-            {data.advance_initial_notes && <Text style={m.advNote}>{wLimit(data.advance_initial_notes, 15)}</Text>}
-          </View>
-          <View style={m.advCardGreen}>
-            <Text style={m.advLabel}>Rollover Advance</Text>
-            <Text style={m.advAmt}>{usd(data.advance_rollover_usd ?? null)}</Text>
-            {data.advance_rollover_conditions && <Text style={m.advNote}>{wLimit(data.advance_rollover_conditions, 15)}</Text>}
-          </View>
-        </View>
-        <View style={m.recoupBox}>
-          <Text style={m.recoupLabel}>How recoupment works</Text>
-          <Text style={m.recoupText}>Advances are recouped from your earned royalties over time. Once fully recouped, royalties flow to you directly.</Text>
-        </View>
-        <View style={m.divider} />
+        {data.advance_initial_usd ? (
+          <>
+            <View style={m.divider} />
+            <Text style={m.secNum}>03</Text>
+            <Text style={m.secTitle}>{data.recoupment_structure ? "Funding & Recoupment" : "Advances & Recoupment"}</Text>
+            <View style={m.advRow}>
+              <View style={m.advCard}>
+                <Text style={m.advLabel}>{data.recoupment_structure ? "Funding" : "Initial Advance"}</Text>
+                <Text style={m.advAmt}>{usd(data.advance_initial_usd)}</Text>
+                {data.advance_initial_notes && <Text style={m.advNote}>{wLimit(data.advance_initial_notes, 15) ?? ""}</Text>}
+              </View>
+              {data.advance_rollover_usd ? (
+                <View style={m.advCardGreen}>
+                  <Text style={m.advLabel}>Rollover Advance</Text>
+                  <Text style={m.advAmt}>{usd(data.advance_rollover_usd)}</Text>
+                  {data.advance_rollover_conditions && <Text style={m.advNote}>{wLimit(data.advance_rollover_conditions, 15) ?? ""}</Text>}
+                </View>
+              ) : null}
+            </View>
+            <View style={m.recoupBox}>
+              <Text style={m.recoupLabel}>How recoupment works</Text>
+              <Text style={m.recoupText}>
+                {data.recoupment_structure ?? "Advances are recouped from your earned royalties over time. Once fully recouped, royalties flow to you directly."}
+              </Text>
+            </View>
+          </>
+        ) : null}
 
         {/* Scope & accounting */}
-        <Text style={m.secNum}>04</Text>
-        <Text style={m.secTitle}>Scope & Accounting</Text>
-        <View style={m.kvCols}>
-          <View style={m.kvCard}>
-            <Text style={m.kvCardLbl}>Scope of Rights</Text>
-            {d.scopeRows.map(({ k, v }) => (
-              <View key={k} style={m.kvRow}>
-                <Text style={m.kvKey}>{k}</Text>
-                <Text style={m.kvVal}>{v}</Text>
-              </View>
-            ))}
-          </View>
-          <View style={m.kvCard}>
-            <Text style={m.kvCardLbl}>Accounting & Audit</Text>
-            {d.acctRows.map(({ k, v }) => (
-              <View key={k} style={m.kvRow}>
-                <Text style={m.kvKey}>{k}</Text>
-                <Text style={m.kvVal}>{v}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-        <View style={m.divider} />
+        {hasScopeOrAcct && (
+          <>
+            <View style={m.divider} />
+            <Text style={m.secNum}>04</Text>
+            <Text style={m.secTitle}>
+              {d.scopeRows.length && d.acctRows.length ? "Scope & Accounting" : d.scopeRows.length ? "Scope" : "Accounting"}
+            </Text>
+            <View style={m.kvCols}>
+              {d.scopeRows.length > 0 && (
+                <View style={m.kvCard}>
+                  <Text style={m.kvCardLbl}>Scope of Rights</Text>
+                  {d.scopeRows.map(({ k, v }) => (
+                    <View key={k} style={m.kvRow}>
+                      <Text style={m.kvKey}>{k}</Text>
+                      <Text style={m.kvVal}>{v}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {d.acctRows.length > 0 && (
+                <View style={m.kvCard}>
+                  <Text style={m.kvCardLbl}>Accounting & Audit</Text>
+                  {d.acctRows.map(({ k, v }) => (
+                    <View key={k} style={m.kvRow}>
+                      <Text style={m.kvKey}>{k}</Text>
+                      <Text style={m.kvVal}>{v}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          </>
+        )}
 
         {/* Plain English */}
-        <Text style={m.secNum}>05</Text>
-        <Text style={m.secTitle}>Plain English Summary</Text>
-        {d.summaryItems.map((item, i) => (
-          <View key={i} style={m.sumRow}>
-            <View style={[m.sumDot, { backgroundColor: item.color }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={m.sumQ}>{item.q}{"  "}<Text style={m.sumBadge}>{item.badge}</Text></Text>
-              <Text style={m.sumA}>{item.a}</Text>
-            </View>
-          </View>
-        ))}
+        {d.summaryItems.length > 0 && (
+          <>
+            <View style={m.divider} />
+            <Text style={m.secNum}>05</Text>
+            <Text style={m.secTitle}>Plain English Summary</Text>
+            {d.summaryItems.map((item, i) => (
+              <View key={i} style={m.sumRow}>
+                <View style={[m.sumDot, { backgroundColor: item.color }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={m.sumQ}>{item.q}</Text>
+                  <Text style={m.sumA}>{item.a}</Text>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
       </Page>
     </Document>
   );
@@ -285,22 +370,14 @@ function MinimalPDF({ data }: { data: DealData }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // WRAPPED PDF
 // ══════════════════════════════════════════════════════════════════════════════
-// react-pdf color approximations (no rgba support):
-//   rgba(255,255,255,0.35) on #0A0A0A → #585858
-//   rgba(255,255,255,0.45) on #1A1814 → #6B6B6B
-//   rgba(255,255,255,0.25) on #0F2318 → #4A5E52
-//   rgba(255,255,255,0.08) on #1A1814 → #282422  (bar track)
-//   rgba(0,0,0,0.4) on #C8F064        → #8A9A40
-
 const w = StyleSheet.create({
-  // Page bases
   pgCover:  { fontFamily: "Helvetica", backgroundColor: "#0A0A0A", padding: 48 },
   pgDark:   { fontFamily: "Helvetica", backgroundColor: "#1A1814", padding: 40 },
   pgGreen:  { fontFamily: "Helvetica", backgroundColor: "#0F2318", padding: 40 },
   pgLime:   { fontFamily: "Helvetica", backgroundColor: "#C8F064", padding: 48 },
+  pgPurple: { fontFamily: "Helvetica", backgroundColor: "#1A0F28", padding: 48 },
   pgLight:  { fontFamily: "Helvetica", backgroundColor: "#F7F5F0", padding: 40 },
 
-  // Cover
   coverLabel:  { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#585858", textTransform: "uppercase", letterSpacing: 1, marginBottom: 40 },
   coverPubl:   { fontSize: 32, fontFamily: "Helvetica-Bold", color: "#FFFFFF", lineHeight: 1.1, marginBottom: 0 },
   coverArtist: { fontSize: 32, fontFamily: "Helvetica-Bold", color: "#C8F064", lineHeight: 1.1, marginBottom: 20 },
@@ -308,17 +385,14 @@ const w = StyleSheet.create({
   coverPill:   { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#585858", borderWidth: 1, borderColor: "#585858", borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start", marginBottom: 0 },
   coverGPS:    { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#585858", letterSpacing: 2, textTransform: "uppercase", marginTop: "auto" as unknown as number },
 
-  // Stat page (dark)
   statLabel:   { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#585858", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
   statValue:   { fontSize: 28, fontFamily: "Helvetica-Bold", color: "#FFFFFF", marginBottom: 4 },
   statSub:     { fontSize: 8, color: "#585858" },
   statDivider: { width: 1, backgroundColor: "#2E2E2E", marginHorizontal: 24 },
 
-  // Section label (used on dark pages)
   secLbl:  { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#C8F064", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
   secIntro:{ fontSize: 11, color: "#6B6B6B", marginBottom: 24 },
 
-  // Bar rows
   barRow:    { marginBottom: 16 },
   barMeta:   { flexDirection: "row", justifyContent: "space-between", marginBottom: 5 },
   barType:   { fontSize: 9, color: "#6B6B6B" },
@@ -327,14 +401,12 @@ const w = StyleSheet.create({
   barFill:   { height: 8, backgroundColor: "#C8F064", borderRadius: 4 },
   barSub:    { fontSize: 7, color: "#585858", marginTop: 4 },
 
-  // Timeline (dark green)
   tlRow:   { flexDirection: "row", gap: 10, marginBottom: 14 },
   tlTime:  { width: 70, fontSize: 7, color: "#4A5E52", textAlign: "right", paddingTop: 1 },
   tlDot:   { width: 8, height: 8, borderRadius: 4, marginTop: 1 },
   tlName:  { fontSize: 10, fontFamily: "Helvetica-Bold", color: "#FFFFFF", marginBottom: 2 },
   tlDesc:  { fontSize: 8, color: "#4A5E52", lineHeight: 1.45 },
 
-  // Advance page (lime)
   advLbl:    { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#8A9A40", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
   advIntro:  { fontSize: 13, color: "#0A0A0A", marginBottom: 10 },
   advBig:    { fontSize: 72, fontFamily: "Helvetica-Bold", color: "#0A0A0A", lineHeight: 1, marginBottom: 6 },
@@ -343,40 +415,37 @@ const w = StyleSheet.create({
   advCardAmt:{ fontSize: 22, fontFamily: "Helvetica-Bold", color: "#0A0A0A", marginBottom: 4 },
   advCardSub:{ fontSize: 8, color: "#8A9A40" },
 
-  // Plain English (light)
+  termLbl:   { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#585858", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
+  termIntro: { fontSize: 12, color: "#A896B0", marginBottom: 10 },
+  termBig:   { fontSize: 72, fontFamily: "Helvetica-Bold", color: "#FFFFFF", lineHeight: 1 },
+  termUnit:  { fontSize: 22, fontFamily: "Helvetica-Bold", color: "#5B4880", marginBottom: 24 },
+  termNote:  { fontSize: 9, color: "#A896B0", lineHeight: 1.6, borderWidth: 1, borderColor: "#2E2138", borderRadius: 8, padding: 16, backgroundColor: "#241840" },
+
   peSecLbl:  { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#A8A4A0", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
   peIntro:   { fontSize: 13, fontFamily: "Helvetica-Bold", color: "#1A1814", marginBottom: 20 },
   peRow:     { flexDirection: "row", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#E0DDD8" },
   peDot:     { width: 8, height: 8, borderRadius: 4, marginTop: 2 },
   peQ:       { fontSize: 9, fontFamily: "Helvetica-Bold", color: "#1A1814", marginBottom: 3 },
   peA:       { fontSize: 8, color: "#7A7570", lineHeight: 1.45 },
-  peBadge:   { fontSize: 7, color: "#1A6B4A" },
 });
-
-const BADGE_COLORS: Record<string, string> = {
-  Critical:   "#B05C1A",
-  High:       "#1A6B4A",
-  Supporting: "#6B6560",
-  Context:    "#6B6560",
-};
 
 function WrappedPDF({ data }: { data: DealData }) {
   const d = buildDerived(data);
-  const BAR_MAX_WIDTH = 400; // points available for bars
+  const BAR_MAX_WIDTH = 400;
+  const showAfterTerm = d.afterAvg !== d.duringAvg;
 
   return (
     <Document>
 
       {/* PAGE 1 — COVER */}
       <Page size="A4" style={w.pgCover}>
-        <Text style={w.coverLabel}>GPS</Text>
+        <Text style={w.coverLabel}>Good Problem Studios</Text>
         <View style={{ flex: 1, justifyContent: "flex-end" }}>
-          <Text style={w.coverPubl}>Good Problem Studios ×</Text>
+          <Text style={w.coverPubl}>{d.publisherLine} ×</Text>
           {d.artistName && <Text style={w.coverArtist}>{d.artistName}</Text>}
           {data.date && <Text style={w.coverDate}>{data.date}</Text>}
           {data.status && <Text style={w.coverPill}>{data.status}</Text>}
         </View>
-        <Text style={w.coverGPS}>Good Problem Studios</Text>
       </Page>
 
       {/* PAGE 2 — KEY NUMBERS */}
@@ -384,10 +453,10 @@ function WrappedPDF({ data }: { data: DealData }) {
         <Text style={w.secLbl}>Key Numbers</Text>
         <View style={{ flexDirection: "row", flex: 1, alignItems: "center" }}>
           {[
-            { label: "Minimum term",  value: d.yrs != null ? `${d.yrs} yrs` : "—",  sub: "Administration period" },
-            { label: "Total advance", value: usdK(d.totalAdv || null),               sub: "Signing + rollover"     },
-            { label: "Royalty range", value: d.royRange,                             sub: "During term"            },
-          ].map(({ label, value, sub }, i) => (
+            d.yrs != null ? { label: d.termLabel, value: `${d.yrs} yrs`, sub: data.renewal_terms ? "Rolling renewal after" : "Administration period" } : null,
+            d.totalAdv > 0 ? { label: d.advanceLabel, value: usdK(d.totalAdv), sub: data.advance_rollover_usd ? "Signing + rollover" : "On signing" } : null,
+            { label: d.shareQuickstat.label, value: d.shareQuickstat.value, sub: d.shareQuickstat.sub },
+          ].filter((s): s is { label: string; value: string; sub: string } => s !== null).map(({ label, value, sub }, i) => (
             <React.Fragment key={label}>
               {i > 0 && <View style={w.statDivider} />}
               <View style={{ flex: 1 }}>
@@ -401,85 +470,100 @@ function WrappedPDF({ data }: { data: DealData }) {
       </Page>
 
       {/* PAGE 3 — ROYALTY SPLIT */}
-      <Page size="A4" orientation="landscape" style={w.pgDark}>
-        <Text style={w.secLbl}>Your Cut</Text>
-        <Text style={w.secIntro}>Every dollar collected. Here's the split.</Text>
-        {d.royalties.map((row, i) => {
-          const fillW = Math.round((row.during_term_pct / 100) * BAR_MAX_WIDTH);
-          const delta = row.post_term_pct - row.during_term_pct;
-          return (
-            <View key={i} style={w.barRow}>
-              <View style={w.barMeta}>
-                <Text style={w.barType}>{cleanType(row.income_type)}</Text>
-                <Text style={w.barPct}>{row.during_term_pct}%</Text>
+      {d.royalties.length > 0 && (
+        <Page size="A4" orientation="landscape" style={w.pgDark}>
+          <Text style={w.secLbl}>Your Cut</Text>
+          <Text style={w.secIntro}>Every dollar collected. Here&apos;s the split.</Text>
+          {d.royalties.map((row, i) => {
+            const fillW = Math.round((row.during_term_pct / 100) * BAR_MAX_WIDTH);
+            const delta = row.post_term_pct - row.during_term_pct;
+            return (
+              <View key={i} style={w.barRow}>
+                <View style={w.barMeta}>
+                  <Text style={w.barType}>{cleanType(row.income_type)}</Text>
+                  <Text style={w.barPct}>{row.during_term_pct}%</Text>
+                </View>
+                <View style={w.barTrack}>
+                  <View style={[w.barFill, { width: fillW }]} />
+                </View>
+                {showAfterTerm && delta !== 0 && (
+                  <Text style={w.barSub}>
+                    {delta > 0 ? `+${delta}% after term` : `${delta}% after term`}
+                  </Text>
+                )}
               </View>
-              <View style={w.barTrack}>
-                <View style={[w.barFill, { width: fillW }]} />
-              </View>
-              {delta !== 0 && (
-                <Text style={w.barSub}>
-                  {delta > 0 ? `+${delta}% after term` : `${delta}% after term`}
-                </Text>
-              )}
-            </View>
-          );
-        })}
-        {d.royalties.length === 0 && (
-          <Text style={{ fontSize: 9, color: "#585858" }}>Royalties not parsed — review contract</Text>
-        )}
-      </Page>
+            );
+          })}
+        </Page>
+      )}
 
       {/* PAGE 4 — TIMELINE */}
-      <Page size="A4" style={w.pgGreen}>
-        <Text style={w.secLbl}>How It Unfolds</Text>
-        <Text style={w.secIntro}>A clear map of where this deal goes.</Text>
-        {d.tlNodes.map((node, i) => (
-          <View key={i} style={w.tlRow}>
-            <Text style={w.tlTime}>{node.timeframe}</Text>
-            <View style={[w.tlDot, { backgroundColor: node.color }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={w.tlName}>{node.label}</Text>
-              <Text style={w.tlDesc}>{node.desc}</Text>
+      {d.tlNodes.length > 0 && (
+        <Page size="A4" style={w.pgGreen}>
+          <Text style={w.secLbl}>How It Unfolds</Text>
+          <Text style={w.secIntro}>A clear map of where this deal goes.</Text>
+          {d.tlNodes.map((node, i) => (
+            <View key={i} style={w.tlRow}>
+              <Text style={w.tlTime}>{node.timeframe !== "—" ? node.timeframe : ""}</Text>
+              <View style={[w.tlDot, { backgroundColor: node.color }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={w.tlName}>{node.label}</Text>
+                <Text style={w.tlDesc}>{node.desc}</Text>
+              </View>
             </View>
-          </View>
-        ))}
-      </Page>
+          ))}
+        </Page>
+      )}
 
-      {/* PAGE 5 — ADVANCES */}
-      <Page size="A4" style={w.pgLime}>
-        <Text style={w.advLbl}>The Advance</Text>
-        <Text style={w.advIntro}>On signing, this is yours.</Text>
-        <Text style={w.advBig}>{usdK(data.advance_initial_usd)}</Text>
-        {data.advance_initial_notes && (
-          <Text style={w.advNote}>{wLimit(data.advance_initial_notes, 15)}</Text>
-        )}
-        {data.advance_rollover_usd && (
-          <View style={w.advCard}>
-            <Text style={w.advCardAmt}>+ {usdK(data.advance_rollover_usd)}</Text>
-            {data.advance_rollover_conditions && (
-              <Text style={w.advCardSub}>{wLimit(data.advance_rollover_conditions, 15)}</Text>
-            )}
-          </View>
-        )}
-      </Page>
-
-      {/* PAGE 6 — PLAIN ENGLISH */}
-      <Page size="A4" style={w.pgLight}>
-        <Text style={w.peSecLbl}>Plain English</Text>
-        <Text style={w.peIntro}>The 7 things that matter most.</Text>
-        {d.summaryItems.map((item, i) => (
-          <View key={i} style={w.peRow}>
-            <View style={[w.peDot, { backgroundColor: item.color }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={w.peQ}>
-                {item.q}{"  "}
-                <Text style={[w.peBadge, { color: BADGE_COLORS[item.badge] ?? "#6B6560" }]}>{item.badge}</Text>
-              </Text>
-              <Text style={w.peA}>{item.a}</Text>
+      {/* PAGE 5 — ADVANCE / FUNDING */}
+      {data.advance_initial_usd ? (
+        <Page size="A4" style={w.pgLime}>
+          <Text style={w.advLbl}>{data.recoupment_structure ? "Funding" : "The Advance"}</Text>
+          <Text style={w.advIntro}>{data.recoupment_structure ? "Guaranteed spend on this deal." : "On signing, this is yours."}</Text>
+          <Text style={w.advBig}>{usdK(data.advance_initial_usd)}</Text>
+          {data.advance_initial_notes && (
+            <Text style={w.advNote}>{wLimit(data.advance_initial_notes, 15) ?? ""}</Text>
+          )}
+          {data.advance_rollover_usd ? (
+            <View style={w.advCard}>
+              <Text style={w.advCardAmt}>+ {usdK(data.advance_rollover_usd)}</Text>
+              {data.advance_rollover_conditions && (
+                <Text style={w.advCardSub}>{wLimit(data.advance_rollover_conditions, 15) ?? ""}</Text>
+              )}
             </View>
-          </View>
-        ))}
-      </Page>
+          ) : null}
+        </Page>
+      ) : null}
+
+      {/* PAGE 6 — THE TERM */}
+      {d.yrs != null && (
+        <Page size="A4" style={w.pgPurple}>
+          <Text style={w.termLbl}>{data.renewal_terms ? "License Period" : "The Term"}</Text>
+          <Text style={w.termIntro}>{data.renewal_terms ? "How long this deal runs." : "Minimum time your music is administered."}</Text>
+          <Text style={w.termBig}>{d.yrs}</Text>
+          <Text style={w.termUnit}>{data.renewal_terms ? "year license" : "years minimum"}</Text>
+          {(data.renewal_terms || data.term_notes) && (
+            <Text style={w.termNote}>{wLimit(data.renewal_terms ?? data.term_notes, 40) ?? ""}</Text>
+          )}
+        </Page>
+      )}
+
+      {/* PAGE 7 — PLAIN ENGLISH */}
+      {d.summaryItems.length > 0 && (
+        <Page size="A4" style={w.pgLight}>
+          <Text style={w.peSecLbl}>Plain English</Text>
+          <Text style={w.peIntro}>The things that matter most.</Text>
+          {d.summaryItems.map((item, i) => (
+            <View key={i} style={w.peRow}>
+              <View style={[w.peDot, { backgroundColor: item.color }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={w.peQ}>{item.q}</Text>
+                <Text style={w.peA}>{item.a}</Text>
+              </View>
+            </View>
+          ))}
+        </Page>
+      )}
 
     </Document>
   );
